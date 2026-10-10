@@ -15,7 +15,7 @@
 //! End-to-end tests for the GENERATED tonic service stubs.
 //!
 //! `ondewo-csi-api` declares exactly one service, `Conversations`, so the fake below implements
-//! all nine of its RPCs - seven unary, the bidirectional `S2sStream` and the server-streaming
+//! all ten of its RPCs - eight unary, the bidirectional `S2sStream` and the server-streaming
 //! `GetControlStream`. It is served over a loopback socket and driven by the generated
 //! `ConversationsClient`, so a request really is encoded, routed by its
 //! `/ondewo.csi.Conversations/<Method>` path, decoded, answered and decoded again. That is what
@@ -57,6 +57,8 @@ struct SeenMetadata {
 #[derive(Clone, Default)]
 struct FakeConversations {
     seen: Arc<Mutex<SeenMetadata>>,
+    /// The media control level `set_call_media_control` applied last.
+    media_control: Arc<Mutex<csi::CallMediaControlLevel>>,
 }
 
 impl FakeConversations {
@@ -221,10 +223,19 @@ impl Conversations for FakeConversations {
             Ok(csi::ControlStreamResponse {
                 control_status: csi::ControlStatus::Ok as i32,
                 epoch: 1,
+                media_control: None,
             }),
             Ok(csi::ControlStreamResponse {
                 control_status: csi::ControlStatus::BargeIn as i32,
                 epoch: 2,
+                media_control: None,
+            }),
+            // A media-control message: it echoes the current control status and epoch, and
+            // carries the level the client has to act on instead.
+            Ok(csi::ControlStreamResponse {
+                control_status: csi::ControlStatus::BargeIn as i32,
+                epoch: 2,
+                media_control: Some(self.media_control.lock().unwrap().clone()),
             }),
         ];
         Ok(Response::new(Box::pin(tokio_stream::iter(responses))))
@@ -238,6 +249,31 @@ impl Conversations for FakeConversations {
         Ok(Response::new(csi::SetControlStatusResponse {
             old_control_status: csi::ControlStatus::Ok as i32,
             new_control_status: request.into_inner().control_status,
+        }))
+    }
+
+    /// Applies a level only when its generation is strictly greater than the last applied one,
+    /// and otherwise answers `stale`, as the real server does.
+    async fn set_call_media_control(
+        &self,
+        request: Request<csi::CallMediaControlLevel>,
+    ) -> Result<Response<csi::SetCallMediaControlResponse>, Status> {
+        self.record(&request);
+        let level = request.into_inner();
+        let mut applied = self.media_control.lock().unwrap();
+        let stale = level.generation <= applied.generation;
+        let changed = !stale
+            && (level.bot_muted, level.listening_paused)
+                != (applied.bot_muted, applied.listening_paused);
+        if !stale {
+            *applied = level;
+        }
+        Ok(Response::new(csi::SetCallMediaControlResponse {
+            applied: Some(applied.clone()),
+            changed,
+            stale,
+            bot_playback_in_flight: false,
+            refusal_reason: String::new(),
         }))
     }
 }
@@ -379,7 +415,59 @@ async fn a_server_streaming_call_delivers_every_message() {
     while let Some(message) = responses.next().await {
         epochs.push(message.expect("every streamed message must decode").epoch);
     }
-    assert_eq!(epochs, vec![1, 2]);
+    assert_eq!(epochs, vec![1, 2, 2]);
+}
+
+/// `SetCallMediaControl` carries the full level and its generation; the response has to report
+/// what the server applied, and the level has to arrive on the control stream as
+/// `media_control` - only on the media-control message, never on a control status transition.
+#[tokio::test]
+async fn a_call_media_control_level_round_trips_and_reaches_the_control_stream() {
+    let (_service, addr) = start_server().await;
+    let mut client = ConversationsClient::new(connect(addr).await);
+    let level = csi::CallMediaControlLevel {
+        bot_muted: true,
+        listening_paused: false,
+        generation: 5,
+        reason: "operator".to_string(),
+    };
+
+    let applied = client
+        .set_call_media_control(level.clone())
+        .await
+        .expect("SetCallMediaControl must succeed")
+        .into_inner();
+    assert_eq!(applied.applied, Some(level.clone()));
+    assert!(applied.changed);
+    assert!(!applied.stale);
+
+    let stale = client
+        .set_call_media_control(csi::CallMediaControlLevel {
+            bot_muted: false,
+            generation: 5,
+            reason: "resync".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("a stale SetCallMediaControl is answered, not refused")
+        .into_inner();
+    assert!(stale.stale);
+    assert!(!stale.changed);
+    assert_eq!(stale.applied, Some(level.clone()));
+
+    let messages: Vec<csi::ControlStreamResponse> = client
+        .get_control_stream(csi::ControlStreamRequest {})
+        .await
+        .expect("GetControlStream must succeed")
+        .into_inner()
+        .map(|message| message.expect("every streamed message must decode"))
+        .collect()
+        .await;
+    let media_control: Vec<Option<csi::CallMediaControlLevel>> = messages
+        .into_iter()
+        .map(|message| message.media_control)
+        .collect();
+    assert_eq!(media_control, vec![None, None, Some(level)]);
 }
 
 /// A server-side `Status` has to reach the caller as that same status, not as a transport error.
@@ -461,6 +549,13 @@ async fn every_declared_service_method_exists_and_is_routable() {
         status.new_control_status,
         csi::ControlStatus::EmergencyStop as i32
     );
+    client
+        .set_call_media_control(csi::CallMediaControlLevel {
+            generation: 1,
+            ..Default::default()
+        })
+        .await
+        .expect("SetCallMediaControl");
 }
 
 /// The hand-written [`BearerTokenInterceptor`] has to put its metadata on the wire, where the
