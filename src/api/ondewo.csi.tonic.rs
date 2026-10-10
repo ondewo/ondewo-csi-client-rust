@@ -302,6 +302,32 @@ pub mod conversations_client {
                 .insert(GrpcMethod::new("ondewo.csi.Conversations", "SetControlStatus"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn set_call_media_control(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CallMediaControlLevel>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetCallMediaControlResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/ondewo.csi.Conversations/SetCallMediaControl",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("ondewo.csi.Conversations", "SetCallMediaControl"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -375,6 +401,13 @@ pub mod conversations_server {
             request: tonic::Request<super::SetControlStatusRequest>,
         ) -> std::result::Result<
             tonic::Response<super::SetControlStatusResponse>,
+            tonic::Status,
+        >;
+        async fn set_call_media_control(
+            &self,
+            request: tonic::Request<super::CallMediaControlLevel>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetCallMediaControlResponse>,
             tonic::Status,
         >;
     }
@@ -851,6 +884,55 @@ pub mod conversations_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = SetControlStatusSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ondewo.csi.Conversations/SetCallMediaControl" => {
+                    #[allow(non_camel_case_types)]
+                    struct SetCallMediaControlSvc<T: Conversations>(pub Arc<T>);
+                    impl<
+                        T: Conversations,
+                    > tonic::server::UnaryService<super::CallMediaControlLevel>
+                    for SetCallMediaControlSvc<T> {
+                        type Response = super::SetCallMediaControlResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CallMediaControlLevel>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Conversations>::set_call_media_control(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = SetCallMediaControlSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

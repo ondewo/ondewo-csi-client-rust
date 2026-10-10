@@ -2,6 +2,41 @@
 
 *****************
 
+## Release ONDEWO CSI Rust Client 5.6.0
+
+### New Features
+
+* Tracking API Version [5.6.0](https://github.com/ondewo/ondewo-csi-api/releases/tag/5.6.0)
+  (5.5.0 before). The regenerated stubs under `src/api` expose the new API surface:
+  * `Conversations.SetCallMediaControl`: per-call operator media control pushed by ondewo-sip.
+    The request `CallMediaControlLevel` carries the full effective level (`bot_muted`,
+    `listening_paused`), a monotonic `generation` and a `reason` token; the response
+    `SetCallMediaControlResponse` reports the `applied` level, `changed`, `stale`,
+    `bot_playback_in_flight` and `refusal_reason`.
+  * `ControlStreamResponse.media_control`: set only on media-control messages of
+    `GetControlStream`. A client must handle such a message as media control and must not apply
+    its echoed `control_status`, which would un-latch a pending `BARGE_IN`.
+  * `SipTrigger.INVITE` is documented as not implemented; use the ondewo-vtsi
+    `Calls.InviteToCall` RPC instead.
+* The change is additive: no field, enum value or RPC was renumbered or removed. Rust code that
+  builds `ControlStreamResponse` with a struct literal needs `media_control` (or
+  `..Default::default()`).
+
+### Tests
+
+* `tests/generated_grpc.rs` serves and calls `SetCallMediaControl` (applied and stale
+  generations) and checks that the level reaches the control stream as `media_control` on the
+  media-control message only.
+* `tests/generated_messages.rs` round-trips a `CallMediaControlLevel` inside a
+  `ControlStreamResponse`, incl. a `u64::MAX` generation.
+
+### Build
+
+* `ondewo-proto-compiler` is pinned to 5.15.5 (5.15.4 before). The vendored nlu, s2t and t2s
+  APIs of ondewo-csi-api are unchanged (7.1.0, 7.5.0, 6.6.0).
+
+*****************
+
 ## Release ONDEWO CSI Rust Client 5.5.1
 
 ### New Features

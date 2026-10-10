@@ -392,3 +392,37 @@ fn messages_of_every_generated_package_are_reachable() {
         pattern
     );
 }
+
+/// `generation` is a `uint64` that is never reset per call, so it has to survive the full range,
+/// and a control stream message without `media_control` has to stay a plain control status
+/// transition after a round trip (`None`, not a default level).
+#[test]
+fn a_media_control_level_round_trips_inside_a_control_stream_message() {
+    let level = csi::CallMediaControlLevel {
+        bot_muted: false,
+        listening_paused: true,
+        generation: u64::MAX,
+        reason: "participant".to_string(),
+    };
+    let message = csi::ControlStreamResponse {
+        control_status: csi::ControlStatus::BargeIn as i32,
+        epoch: 3,
+        media_control: Some(level.clone()),
+    };
+
+    let parsed = csi::ControlStreamResponse::decode(message.encode_to_vec().as_slice()).unwrap();
+    assert_eq!(parsed, message);
+    assert_eq!(parsed.media_control.unwrap().generation, u64::MAX);
+
+    let transition = csi::ControlStreamResponse {
+        control_status: csi::ControlStatus::Ok as i32,
+        epoch: 4,
+        media_control: None,
+    };
+    assert_eq!(
+        csi::ControlStreamResponse::decode(transition.encode_to_vec().as_slice())
+            .unwrap()
+            .media_control,
+        None
+    );
+}

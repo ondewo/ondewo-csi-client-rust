@@ -137,7 +137,8 @@ pub mod sip_trigger {
         Pause = 4,
         /// transfer
         Transfer = 5,
-        /// invite to conference call
+        /// invite to conference call. NOT IMPLEMENTED: ondewo-csi cannot reach ondewo-vtsi, which owns call
+        /// participants. Invite a softphone with the ondewo-vtsi <code>Calls.InviteToCall</code> RPC instead
         Invite = 6,
         /// play audio
         PlayAudio = 7,
@@ -193,7 +194,7 @@ pub struct CheckUpstreamHealthResponse {
 pub struct ControlStreamRequest {
 }
 /// Control stream response message.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ControlStreamResponse {
     /// Control status
     #[prost(enumeration="ControlStatus", tag="1")]
@@ -201,6 +202,17 @@ pub struct ControlStreamResponse {
     /// Monotonic barge-in epoch/sequence number so control status transitions are correlatable with the <code>S2sStreamResponse</code> <code>turn_epoch</code> and a second barge-in during a resumed remainder can never be coalesced away
     #[prost(uint64, tag="2")]
     pub epoch: u64,
+    /// <p>Optional. The per-call operator media control level. Set ONLY on media-control messages: pushed when the
+    /// level changes (<code>SetCallMediaControl</code>) and sent as the seed on every <code>GetControlStream</code>
+    /// connect.</p>
+    ///
+    /// <p>A message that has this field set is a media-control message and nothing else: a client must handle it
+    /// and must NOT read its <code>control_status</code> / <code>epoch</code> as a control status transition. The
+    /// server echoes the current control status and epoch in it, but a client that applied that
+    /// <code>control_status</code> (e.g. <code>OK</code>) would un-latch a pending <code>BARGE_IN</code>.
+    /// Messages without this field keep their meaning unchanged.</p>
+    #[prost(message, optional, tag="3")]
+    pub media_control: ::core::option::Option<CallMediaControlLevel>,
 }
 /// Request to set control status.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -218,6 +230,54 @@ pub struct SetControlStatusResponse {
     /// Current 'new' control status
     #[prost(enumeration="ControlStatus", tag="2")]
     pub new_control_status: i32,
+}
+/// <p>Per-call operator media control level, sent by ondewo-sip to <code>SetCallMediaControl</code> and pushed by the
+/// server on the control stream (<code>ControlStreamResponse.media_control</code>).</p>
+///
+/// <p>It always carries the FULL effective level. It is independent of the bot's own mixer mute that ondewo-csi
+/// requests from ondewo-sip with <code>SipMute</code> / <code>SipUnMute</code>.</p>
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CallMediaControlLevel {
+    /// <p>If <code>true</code>, the bot is muted: no text-to-speech is synthesized for new responses (the NLU turn
+    /// still runs), the in-flight utterance is aborted and discarded (never resumed), and soft-timeout fillers,
+    /// re-prompts and <code>PLAY_AUDIO</code> triggers produce no audio.</p>
+    #[prost(bool, tag="1")]
+    pub bot_muted: bool,
+    /// <p>If <code>true</code>, the bot stops listening: the caller audio sent to speech-to-text is replaced by muted
+    /// zero frames at the capture cadence (the stream stays open and its clock stays aligned with the call), S2T
+    /// responses are dropped before barge-in adjudication and before NLU, and the turn, soft and silence
+    /// timers are suspended (they restart from zero on resume). Blanked audio is never back-filled.</p>
+    #[prost(bool, tag="2")]
+    pub listening_paused: bool,
+    /// <p>ondewo-sip's container-lifetime monotonic counter. Never reset per call. The server applies a level only
+    /// when this value is strictly greater than the last applied one.</p>
+    #[prost(uint64, tag="3")]
+    pub generation: u64,
+    /// <p>Bounded reason token for logs and telemetry: <code>operator</code>, <code>participant</code>,
+    /// <code>takeover</code> or <code>resync</code>.</p>
+    #[prost(string, tag="4")]
+    pub reason: ::prost::alloc::string::String,
+}
+/// <p>Response of <code>SetCallMediaControl</code>.</p>
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetCallMediaControlResponse {
+    /// <p>The level the server holds after this request.</p>
+    #[prost(message, optional, tag="1")]
+    pub applied: ::core::option::Option<CallMediaControlLevel>,
+    /// <p><code>true</code> if the effective level changed.</p>
+    #[prost(bool, tag="2")]
+    pub changed: bool,
+    /// <p><code>true</code> if the request's generation was not greater than the last applied generation. The
+    /// request was ignored.</p>
+    #[prost(bool, tag="3")]
+    pub stale: bool,
+    /// <p><code>true</code> while an utterance is still draining to the caller.</p>
+    #[prost(bool, tag="4")]
+    pub bot_playback_in_flight: bool,
+    /// <p>Empty when the level was applied. Otherwise a stable refusal token: <code>amd-in-progress</code>
+    /// (<code>listening_paused</code> refused during the answering-machine-detection window).</p>
+    #[prost(string, tag="5")]
+    pub refusal_reason: ::prost::alloc::string::String,
 }
 /// A condition message with its type and value.
 /// A Condition can be of various types.
