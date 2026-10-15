@@ -22,8 +22,13 @@
 //! catches a service the generator wired to the wrong path, a codec mismatch, or a method that
 //! silently went missing.
 //!
+//! `tests/api_surface.rs` checks the stubs against the protos.
+//!
 //! No network beyond `127.0.0.1` and no ONDEWO server is involved.
 
+mod common;
+
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -556,6 +561,25 @@ async fn every_declared_service_method_exists_and_is_routable() {
         })
         .await
         .expect("SetCallMediaControl");
+
+    // Compared with the methods DERIVED from the generated code: an rpc that a new API release
+    // adds fails here until it is called above.
+    let called: BTreeSet<String> = [
+        "create_s2s_pipeline",
+        "get_s2s_pipeline",
+        "update_s2s_pipeline",
+        "delete_s2s_pipeline",
+        "list_s2s_pipelines",
+        "s2s_stream",
+        "check_upstream_health",
+        "get_control_stream",
+        "set_control_status",
+        "set_call_media_control",
+    ]
+    .iter()
+    .map(|method| method.to_string())
+    .collect();
+    assert_eq!(called, common::generated_methods("Conversations"));
 }
 
 /// The hand-written [`BearerTokenInterceptor`] has to put its metadata on the wire, where the
