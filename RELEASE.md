@@ -2,6 +2,15 @@
 
 *****************
 
+## Release ONDEWO CSI Rust Client 5.9.0
+
+### Improvements
+
+* Tracking API Version [5.9.0](https://github.com/ondewo/ondewo-csi-api/releases/tag/5.9.0) ( [Documentation](https://ondewo.github.io/ondewo-csi-api/) )
+* Generated with ondewo-proto-compiler 5.17.0 (protoc 35.1); new runtime floors: prost / prost-types 0.14.6, tonic / tonic-prost 0.14.9 (protoc 35.1).
+
+*****************
+
 ## Release ONDEWO CSI Rust Client 5.7.0
 
 ### Improvements

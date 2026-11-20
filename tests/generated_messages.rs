@@ -324,6 +324,7 @@ fn messages_of_every_generated_package_are_reachable() {
                 ..Default::default()
             },
         )),
+        ..Default::default()
     };
     let parsed = csi::S2sStreamResponse::decode(response.encode_to_vec().as_slice()).unwrap();
     assert_eq!(parsed, response);
@@ -408,6 +409,7 @@ fn a_media_control_level_round_trips_inside_a_control_stream_message() {
         control_status: csi::ControlStatus::BargeIn as i32,
         epoch: 3,
         media_control: Some(level.clone()),
+        ..Default::default()
     };
 
     let parsed = csi::ControlStreamResponse::decode(message.encode_to_vec().as_slice()).unwrap();
@@ -418,6 +420,7 @@ fn a_media_control_level_round_trips_inside_a_control_stream_message() {
         control_status: csi::ControlStatus::Ok as i32,
         epoch: 4,
         media_control: None,
+        ..Default::default()
     };
     assert_eq!(
         csi::ControlStreamResponse::decode(transition.encode_to_vec().as_slice())

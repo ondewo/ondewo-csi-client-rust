@@ -106,6 +106,7 @@ fn synthesized(utterance_id: &str, chunk_index: i32) -> csi::S2sStreamResponse {
                 ..Default::default()
             },
         )),
+        ..Default::default()
     }
 }
 
@@ -229,11 +230,13 @@ impl Conversations for FakeConversations {
                 control_status: csi::ControlStatus::Ok as i32,
                 epoch: 1,
                 media_control: None,
+                ..Default::default()
             }),
             Ok(csi::ControlStreamResponse {
                 control_status: csi::ControlStatus::BargeIn as i32,
                 epoch: 2,
                 media_control: None,
+                ..Default::default()
             }),
             // A media-control message: it echoes the current control status and epoch, and
             // carries the level the client has to act on instead.
@@ -241,9 +244,31 @@ impl Conversations for FakeConversations {
                 control_status: csi::ControlStatus::BargeIn as i32,
                 epoch: 2,
                 media_control: Some(self.media_control.lock().unwrap().clone()),
+                ..Default::default()
             }),
         ];
         Ok(Response::new(Box::pin(tokio_stream::iter(responses))))
+    }
+
+    async fn set_caller_dtmf(
+        &self,
+        request: Request<csi::CallerDtmfRequest>,
+    ) -> Result<Response<csi::CallerDtmfResponse>, Status> {
+        self.record(&request);
+        Ok(Response::new(csi::CallerDtmfResponse {
+            accepted: true,
+            ..Default::default()
+        }))
+    }
+
+    async fn deliver_warm_transfer_outcome_notice(
+        &self,
+        request: Request<csi::WarmTransferOutcomeNotice>,
+    ) -> Result<Response<csi::WarmTransferOutcomeNoticeResponse>, Status> {
+        self.record(&request);
+        Ok(Response::new(csi::WarmTransferOutcomeNoticeResponse {
+            status: csi::WarmTransferOutcomeNoticeStatus::Queued as i32,
+        }))
     }
 
     async fn set_control_status(
@@ -546,6 +571,7 @@ async fn every_declared_service_method_exists_and_is_routable() {
     let status = client
         .set_control_status(csi::SetControlStatusRequest {
             control_status: csi::ControlStatus::EmergencyStop as i32,
+            ..Default::default()
         })
         .await
         .expect("SetControlStatus")
@@ -561,6 +587,27 @@ async fn every_declared_service_method_exists_and_is_routable() {
         })
         .await
         .expect("SetCallMediaControl");
+    let dtmf = client
+        .set_caller_dtmf(csi::CallerDtmfRequest {
+            digit: "5".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("SetCallerDtmf")
+        .into_inner();
+    assert!(dtmf.accepted);
+    let notice = client
+        .deliver_warm_transfer_outcome_notice(csi::WarmTransferOutcomeNotice {
+            request_id: "notice-1".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("DeliverWarmTransferOutcomeNotice")
+        .into_inner();
+    assert_eq!(
+        notice.status,
+        csi::WarmTransferOutcomeNoticeStatus::Queued as i32
+    );
 
     // Compared with the methods DERIVED from the generated code: an rpc that a new API release
     // adds fails here until it is called above.
@@ -575,6 +622,8 @@ async fn every_declared_service_method_exists_and_is_routable() {
         "get_control_stream",
         "set_control_status",
         "set_call_media_control",
+        "set_caller_dtmf",
+        "deliver_warm_transfer_outcome_notice",
     ]
     .iter()
     .map(|method| method.to_string())

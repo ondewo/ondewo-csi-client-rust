@@ -328,6 +328,59 @@ pub mod conversations_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn set_caller_dtmf(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CallerDtmfRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CallerDtmfResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/ondewo.csi.Conversations/SetCallerDtmf",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("ondewo.csi.Conversations", "SetCallerDtmf"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn deliver_warm_transfer_outcome_notice(
+            &mut self,
+            request: impl tonic::IntoRequest<super::WarmTransferOutcomeNotice>,
+        ) -> std::result::Result<
+            tonic::Response<super::WarmTransferOutcomeNoticeResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/ondewo.csi.Conversations/DeliverWarmTransferOutcomeNotice",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "ondewo.csi.Conversations",
+                        "DeliverWarmTransferOutcomeNotice",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -408,6 +461,20 @@ pub mod conversations_server {
             request: tonic::Request<super::CallMediaControlLevel>,
         ) -> std::result::Result<
             tonic::Response<super::SetCallMediaControlResponse>,
+            tonic::Status,
+        >;
+        async fn set_caller_dtmf(
+            &self,
+            request: tonic::Request<super::CallerDtmfRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CallerDtmfResponse>,
+            tonic::Status,
+        >;
+        async fn deliver_warm_transfer_outcome_notice(
+            &self,
+            request: tonic::Request<super::WarmTransferOutcomeNotice>,
+        ) -> std::result::Result<
+            tonic::Response<super::WarmTransferOutcomeNoticeResponse>,
             tonic::Status,
         >;
     }
@@ -933,6 +1000,102 @@ pub mod conversations_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = SetCallMediaControlSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ondewo.csi.Conversations/SetCallerDtmf" => {
+                    #[allow(non_camel_case_types)]
+                    struct SetCallerDtmfSvc<T: Conversations>(pub Arc<T>);
+                    impl<
+                        T: Conversations,
+                    > tonic::server::UnaryService<super::CallerDtmfRequest>
+                    for SetCallerDtmfSvc<T> {
+                        type Response = super::CallerDtmfResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CallerDtmfRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Conversations>::set_caller_dtmf(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = SetCallerDtmfSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/ondewo.csi.Conversations/DeliverWarmTransferOutcomeNotice" => {
+                    #[allow(non_camel_case_types)]
+                    struct DeliverWarmTransferOutcomeNoticeSvc<T: Conversations>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: Conversations,
+                    > tonic::server::UnaryService<super::WarmTransferOutcomeNotice>
+                    for DeliverWarmTransferOutcomeNoticeSvc<T> {
+                        type Response = super::WarmTransferOutcomeNoticeResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::WarmTransferOutcomeNotice>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Conversations>::deliver_warm_transfer_outcome_notice(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DeliverWarmTransferOutcomeNoticeSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

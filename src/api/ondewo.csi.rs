@@ -89,6 +89,15 @@ pub struct S2sStreamResponse {
     /// Optional. Monotonic turn epoch of the conversation turn that produced this response. Used by consumers to fence stale audio of an interrupted turn
     #[prost(uint64, tag="7")]
     pub turn_epoch: u64,
+    /// <p>Optional. One-based sequence number of this response on its <code>S2sStream</code>, assigned by the server
+    /// when it yields the response and counted over EVERY response of the stream (audio, NLU and SIP trigger), so it
+    /// is independent of whether anything is stored or framed. <code>0</code> means the server does not number its
+    /// responses (an older server).</p>
+    ///
+    /// <p>It names a response that has no <code>utterance_id</code> (the greeting, a merged utterance, a filler,
+    /// the apology) in <code>PlaybackCut.response_sequence</code> and in a <code>PLAYBACK_DONE</code> report.</p>
+    #[prost(uint64, tag="8")]
+    pub response_sequence: u64,
     /// Response type for the S2S stream. One of the following will be populated.
     #[prost(oneof="s2s_stream_response::Response", tags="1, 2, 3")]
     pub response: ::core::option::Option<s2s_stream_response::Response>,
@@ -213,15 +222,89 @@ pub struct ControlStreamResponse {
     /// Messages without this field keep their meaning unchanged.</p>
     #[prost(message, optional, tag="3")]
     pub media_control: ::core::option::Option<CallMediaControlLevel>,
+    /// <p>Optional. Non-zero only on a <code>BARGE_IN</code> transition sent by a server that consumes
+    /// <code>PlaybackCut</code>: the server asks the client to report the cut with <code>PLAYBACK_CUT</code> and to
+    /// echo this value in <code>PlaybackCut.playback_cut_request_id</code>. The value is the server's
+    /// process-lifetime, never rewound sequence number of that transition, so every barge-in (including a second one
+    /// during a resumed remainder, which keeps its epoch) has its own id.</p>
+    ///
+    /// <p><code>0</code> means no cut is requested: an older server, a server with no in-container token
+    /// configured, the seed of a new control stream, a media-control message, or any status other than
+    /// <code>BARGE_IN</code>.</p>
+    #[prost(uint64, tag="4")]
+    pub playback_cut_request_id: u64,
 }
 /// Request to set control status.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetControlStatusRequest {
     /// Control status
     #[prost(enumeration="ControlStatus", tag="1")]
     pub control_status: i32,
+    /// Optional. Set if and only if <code>control_status</code> is <code>PLAYBACK_CUT</code>. A
+    /// <code>PLAYBACK_CUT</code> without it is answered <code>INVALID_ARGUMENT</code>; any other status ignores it
+    #[prost(message, optional, tag="2")]
+    pub playback_cut: ::core::option::Option<PlaybackCut>,
+    /// <p>Optional. Set only with <code>PLAYBACK_DONE</code>: the <code>S2sStreamResponse.utterance_id</code> of the
+    /// utterance whose playback completed. Empty for a response that carries no <code>utterance_id</code>; that one
+    /// is named by <code>response_sequence</code>.</p>
+    #[prost(string, tag="3")]
+    pub utterance_id: ::prost::alloc::string::String,
+    /// <p>Optional. Set only with <code>PLAYBACK_DONE</code>: the <code>S2sStreamResponse.response_sequence</code> of
+    /// the last response of the completed utterance. <code>0</code> if the server does not number its responses.</p>
+    #[prost(uint64, tag="4")]
+    pub response_sequence: u64,
 }
-/// Response of setting the control status with the old and new status objects.
+/// <p>Where playback stood when the client aborted it for a <code>BARGE_IN</code>, reported with
+/// <code>PLAYBACK_CUT</code>. All audio positions refer to the response named by <code>utterance_id</code> /
+/// <code>response_sequence</code> and are measured by the client on the thread that owns the audio connection.</p>
+///
+/// <p>The client reports raw values only. The server computes the played prefix in one place as
+/// <code>written_audio_us - min(queued_audio_us, written_audio_us)</code>: the audio handed to the audio device
+/// minus the audio that was still queued in it and was flushed.</p>
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PlaybackCut {
+    /// The <code>ControlStreamResponse.playback_cut_request_id</code> of the <code>BARGE_IN</code> this cut answers.
+    /// The server records a cut only while this id is pending on the current stream; any other id is answered OK and
+    /// dropped (see <code>PLAYBACK_CUT</code>)
+    #[prost(uint64, tag="1")]
+    pub playback_cut_request_id: u64,
+    /// The <code>ControlStreamResponse.epoch</code> of that <code>BARGE_IN</code>
+    #[prost(uint64, tag="2")]
+    pub barge_in_epoch: u64,
+    /// The <code>S2sStreamResponse.utterance_id</code> playing at the cut. Empty if that response has none, or if
+    /// nothing was playing
+    #[prost(string, tag="3")]
+    pub utterance_id: ::prost::alloc::string::String,
+    /// The <code>S2sStreamResponse.chunk_index</code> playing at the cut
+    #[prost(int32, tag="4")]
+    pub chunk_index: i32,
+    /// The <code>S2sStreamResponse.response_sequence</code> playing at the cut. <code>0</code> if nothing was playing
+    /// or the server does not number its responses
+    #[prost(uint64, tag="5")]
+    pub response_sequence: u64,
+    /// Microseconds of audio of that utterance (or of that single response, if it has no <code>utterance_id</code>)
+    /// handed to the audio device since it started playing, across a resumed remainder
+    #[prost(int64, tag="6")]
+    pub written_audio_us: i64,
+    /// Microseconds of audio still queued in the audio device at the cut, read once just before the queue was
+    /// flushed. If the device latency could not be read, the client sends its configured target buffer length
+    /// instead and sets <code>queued_audio_estimated</code>
+    #[prost(int64, tag="7")]
+    pub queued_audio_us: i64,
+    /// <code>true</code> if <code>queued_audio_us</code> is the configured target buffer length rather than a
+    /// latency read
+    #[prost(bool, tag="8")]
+    pub queued_audio_estimated: bool,
+    /// <code>CLOCK_MONOTONIC</code> time of the cut in nanoseconds. The client runs on the same host as the server,
+    /// so the server can compare it with its own monotonic clock
+    #[prost(int64, tag="9")]
+    pub cut_monotonic_ns: i64,
+    /// <code>true</code> if the client kept the un-played remainder so that <code>RESUME_PLAYBACK</code> can play it
+    #[prost(bool, tag="10")]
+    pub remainder_held: bool,
+}
+/// Response of setting the control status with the old and new status objects. For a report that is not a state
+/// (<code>PLAYBACK_CUT</code>) both fields carry the status the server holds, unchanged.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetControlStatusResponse {
     /// Previous 'old' control status
@@ -278,6 +361,88 @@ pub struct SetCallMediaControlResponse {
     /// (<code>listening_paused</code> refused during the answering-machine-detection window).</p>
     #[prost(string, tag="5")]
     pub refusal_reason: ::prost::alloc::string::String,
+}
+/// <p>One DTMF key the caller pressed, sent by ondewo-sip to <code>SetCallerDtmf</code>.</p>
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CallerDtmfRequest {
+    /// <p>ondewo-sip's id of the call the key belongs to (<code>SipStatus.call_id</code>). A key of another call
+    /// than the server's current one is refused.</p>
+    #[prost(string, tag="1")]
+    pub call_id: ::prost::alloc::string::String,
+    /// <p>1 for the first key of the call, then +1 per key ondewo-sip admitted. A sequence number not greater than
+    /// the last one accepted for the call is refused.</p>
+    #[prost(uint64, tag="2")]
+    pub sequence: u64,
+    /// <p>The key: one of <code>0</code>-<code>9</code>, <code>*</code>, <code>#</code>, <code>A</code>-<code>D</code>.
+    /// Never logged in clear.</p>
+    #[prost(string, tag="3")]
+    pub digit: ::prost::alloc::string::String,
+    /// <p>How long the key was held, in milliseconds; 0 when unknown.</p>
+    #[prost(uint32, tag="4")]
+    pub duration_ms: u32,
+    /// <p>When ondewo-sip received the key, in nanoseconds since the Unix epoch (for the key-to-audio latency).</p>
+    #[prost(int64, tag="5")]
+    pub received_unix_ns: i64,
+}
+/// <p>Response of <code>SetCallerDtmf</code>.</p>
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CallerDtmfResponse {
+    /// <p><code>true</code> if the server took the key as caller input.</p>
+    #[prost(bool, tag="1")]
+    pub accepted: bool,
+    /// <p>Empty when accepted. Otherwise a stable token: <code>disabled</code>, <code>no-call</code>,
+    /// <code>other-call</code>, <code>stale-sequence</code>, <code>invalid-digit</code>, <code>listening-paused</code>,
+    /// <code>amd-in-progress</code>, <code>undeclared</code> or <code>invalid-key</code> (a menu key outside the menu's
+    /// options while the menu ignores such keys).</p>
+    #[prost(string, tag="2")]
+    pub reason: ::prost::alloc::string::String,
+}
+/// <p>A warm-transfer outcome the bot must tell the caller, sent by ondewo-sip to
+/// <code>DeliverWarmTransferOutcomeNotice</code>.</p>
+///
+/// <p>The server takes each <code>request_id</code> at most once per call, and forgets the call's notices at
+/// <code>CALL_ENDED</code>. A queued <code>DECLINED</code> or <code>UNREACHABLE</code> notice is committed as a
+/// <code>\[TRANSFER:DECLINED\]</code> / <code>\[TRANSFER:UNREACHABLE\]</code> caller turn when the NLU server advertised
+/// the <code>x-ondewo-cai-warm-intro: 1</code> capability on the call, so the NLU answers it. Otherwise (the capability
+/// is unknown or absent), the server speaks <code>fallback_text</code> itself as a bot utterance. Either way it is an
+/// ordinary utterance the caller can interrupt. No field carries the decline reason, and the server logs none of
+/// the texts.</p>
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WarmTransferOutcomeNotice {
+    /// <p>ondewo-vtsi's transfer request id, or ondewo-sip's delegated request id for
+    /// <code>WARM_TRANSFER_OUTCOME_DELEGATION_EXPIRED</code>. 1 to 128 characters. A second notice with the same id
+    /// on the same call is answered <code>DUPLICATE</code> and changes nothing.</p>
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    /// <p>What happened to the transfer. <code>WARM_TRANSFER_OUTCOME_UNSPECIFIED</code> is answered
+    /// <code>INVALID</code>.</p>
+    #[prost(enumeration="WarmTransferOutcome", tag="2")]
+    pub outcome: i32,
+    /// <p>NLU session name of the intro session, which holds the decline reason. Only with
+    /// <code>WARM_TRANSFER_OUTCOME_DECLINED</code>, and empty when the target gave no reason; ignored with any other
+    /// outcome.</p>
+    #[prost(string, tag="3")]
+    pub intro_session: ::prost::alloc::string::String,
+    /// <p>Display name of the transfer target, at most 128 characters. May be empty.</p>
+    #[prost(string, tag="4")]
+    pub callee_display_name: ::prost::alloc::string::String,
+    /// <p>Bounded lowercase token naming the cause, at most 64 characters, e.g. <code>voicemail-suspected</code>,
+    /// <code>target-hung-up</code> or <code>no-free-listener</code>. For logs and telemetry only.</p>
+    #[prost(string, tag="5")]
+    pub cause: ::prost::alloc::string::String,
+    /// <p>The sentence the bot speaks when it cannot commit the notice as a turn: rendered by ondewo-vtsi from its
+    /// template, with the target's display name and without any decline reason. At most 1024 characters. Empty with
+    /// <code>WARM_TRANSFER_OUTCOME_DELEGATION_EXPIRED</code>.</p>
+    #[prost(string, tag="6")]
+    pub fallback_text: ::prost::alloc::string::String,
+}
+/// <p>Response of <code>DeliverWarmTransferOutcomeNotice</code>.</p>
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WarmTransferOutcomeNoticeResponse {
+    /// <p>How the server took the notice. The checks run in this order: <code>DISABLED</code>,
+    /// <code>INVALID</code>, <code>DUPLICATE</code>, then <code>QUEUED</code>.</p>
+    #[prost(enumeration="WarmTransferOutcomeNoticeStatus", tag="1")]
+    pub status: i32,
 }
 /// A condition message with its type and value.
 /// A Condition can be of various types.
@@ -421,6 +586,38 @@ pub enum ControlStatus {
     PlaybackDone = 7,
     /// Status reported by ondewo-sip to the server via <code>SetControlStatus</code> that the phone call has ENDED and the server must reset ALL per-call state in place (persistent-listener model). It is a command, not a state: it is never pushed onto the control stream
     CallEnded = 8,
+    /// <p>Status reported by the client to the server via <code>SetControlStatus</code>, with
+    /// <code>SetControlStatusRequest.playback_cut</code> set, after it aborted playback for a <code>BARGE_IN</code>
+    /// whose <code>ControlStreamResponse</code> carried a non-zero <code>playback_cut_request_id</code>. It reports
+    /// how much of the cut audio the caller can have heard.</p>
+    ///
+    /// <p>Like <code>CALL_ENDED</code> it is a report, not a state: the server never assigns it to the control status,
+    /// never pushes it onto the control stream and leaves a pending <code>BARGE_IN</code> latched. The request must
+    /// carry the in-container token (the <code>x-ondewo-sip-in-container-token</code> metadatum). A client sends it
+    /// only after reading a non-zero <code>playback_cut_request_id</code>, so a server that does not consume cuts
+    /// never receives it.</p>
+    ///
+    /// <p>How the server answers, checked in this order:</p>
+    /// <ul>
+    ///    <li>Token missing or not equal to the server's: <code>UNAUTHENTICATED</code>, nothing is recorded. A
+    ///    server with NO token configured (a standalone server, or one relaunched without its token) refuses every
+    ///    cut this way and never requests one: it sends <code>playback_cut_request_id = 0</code> and keeps its own
+    ///    estimate. The client must not retry an <code>UNAUTHENTICATED</code> cut.</li>
+    ///    <li><code>playback_cut</code> not set: <code>INVALID_ARGUMENT</code>, nothing is recorded. The client must
+    ///    not retry it.</li>
+    ///    <li><code>playback_cut_request_id</code> not pending on the current control stream (zero, unknown, already
+    ///    answered, superseded by a newer <code>BARGE_IN</code>, from a previous stream or a previous call): OK, the
+    ///    cut is dropped and the server keeps its own estimate.</li>
+    ///    <li>Otherwise: OK, the cut is recorded and the id stops being pending.</li>
+    /// </ul>
+    ///
+    /// <p>An OK answer carries the control status the server holds, unchanged:
+    /// <code>old_control_status == new_control_status</code>, in practice <code>BARGE_IN</code> while it is still
+    /// latched. It does not say whether the cut was recorded or dropped; nothing on the client depends on that.
+    /// Any other status (<code>UNAVAILABLE</code>, <code>DEADLINE_EXCEEDED</code>, ...) means the cut may or may not
+    /// have arrived; the client may retry it with the same <code>playback_cut_request_id</code>, because a second copy
+    /// of an answered id is dropped.</p>
+    PlaybackCut = 9,
 }
 impl ControlStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -438,6 +635,7 @@ impl ControlStatus {
             Self::PlaybackResumed => "PLAYBACK_RESUMED",
             Self::PlaybackDone => "PLAYBACK_DONE",
             Self::CallEnded => "CALL_ENDED",
+            Self::PlaybackCut => "PLAYBACK_CUT",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -452,6 +650,91 @@ impl ControlStatus {
             "PLAYBACK_RESUMED" => Some(Self::PlaybackResumed),
             "PLAYBACK_DONE" => Some(Self::PlaybackDone),
             "CALL_ENDED" => Some(Self::CallEnded),
+            "PLAYBACK_CUT" => Some(Self::PlaybackCut),
+            _ => None,
+        }
+    }
+}
+/// <p>Outcome of a warm transfer that did not hand the caller over.</p>
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WarmTransferOutcome {
+    /// <p>Not set. A notice with this outcome is answered <code>INVALID</code>.</p>
+    Unspecified = 0,
+    /// <p>The transfer target declined the call. The caller stays with the bot.</p>
+    Declined = 1,
+    /// <p>The transfer target could not be reached: busy, no answer, no decision in time, or the intro could not
+    /// run. The caller stays with the bot.</p>
+    Unreachable = 2,
+    /// <p>A transfer the bot asked for was handed to ondewo-vtsi and never claimed in time. ondewo-sip sent no
+    /// transfer. The server runs its failed-transfer action (<code>CSI_TRANSFER_FAILED_ACTION</code>) instead of
+    /// speaking a notice.</p>
+    DelegationExpired = 3,
+}
+impl WarmTransferOutcome {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "WARM_TRANSFER_OUTCOME_UNSPECIFIED",
+            Self::Declined => "WARM_TRANSFER_OUTCOME_DECLINED",
+            Self::Unreachable => "WARM_TRANSFER_OUTCOME_UNREACHABLE",
+            Self::DelegationExpired => "WARM_TRANSFER_OUTCOME_DELEGATION_EXPIRED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WARM_TRANSFER_OUTCOME_UNSPECIFIED" => Some(Self::Unspecified),
+            "WARM_TRANSFER_OUTCOME_DECLINED" => Some(Self::Declined),
+            "WARM_TRANSFER_OUTCOME_UNREACHABLE" => Some(Self::Unreachable),
+            "WARM_TRANSFER_OUTCOME_DELEGATION_EXPIRED" => Some(Self::DelegationExpired),
+            _ => None,
+        }
+    }
+}
+/// <p>How the server took a <code>WarmTransferOutcomeNotice</code>.</p>
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WarmTransferOutcomeNoticeStatus {
+    /// <p>Never sent by the server.</p>
+    Unspecified = 0,
+    /// <p>The notice was queued for the current call and will be spoken unless the call ends first.</p>
+    Queued = 1,
+    /// <p>A notice with this <code>request_id</code> was already taken on this call. Nothing changed.</p>
+    Duplicate = 2,
+    /// <p>The server takes no notices (<code>CSI_WARM_TRANSFER_OUTCOME_ACTIVE</code> is not <code>true</code>).
+    /// Nothing changed.</p>
+    Disabled = 3,
+    /// <p>The notice breaks a rule of <code>WarmTransferOutcomeNotice</code>: an empty or over-long
+    /// <code>request_id</code>, an unspecified or unknown <code>outcome</code>, or a field over its bound. Nothing
+    /// changed; the sender must not retry it unchanged.</p>
+    Invalid = 4,
+}
+impl WarmTransferOutcomeNoticeStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_UNSPECIFIED",
+            Self::Queued => "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_QUEUED",
+            Self::Duplicate => "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_DUPLICATE",
+            Self::Disabled => "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_DISABLED",
+            Self::Invalid => "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_INVALID",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_QUEUED" => Some(Self::Queued),
+            "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_DUPLICATE" => Some(Self::Duplicate),
+            "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_DISABLED" => Some(Self::Disabled),
+            "WARM_TRANSFER_OUTCOME_NOTICE_STATUS_INVALID" => Some(Self::Invalid),
             _ => None,
         }
     }
